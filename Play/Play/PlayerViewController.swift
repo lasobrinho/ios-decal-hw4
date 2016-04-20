@@ -24,19 +24,36 @@ class PlayerViewController: UIViewController {
     var artistLabel: UILabel!
     var titleLabel: UILabel!
     
+    var playing = false
+    var firstTime = true
+    
+    var scrubber: UISlider!
+    var backgroundImage: UIImageView!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         view = UIView(frame: UIScreen.mainScreen().bounds)
-        view.backgroundColor = UIColor.whiteColor()
 
         scAPI = SoundCloudAPI()
         scAPI.loadTracks(didLoadTracks)
         currentIndex = 0
         
-        player = AVPlayer()
-        
         loadVisualElements()
         loadPlayerButtons()
+    }
+    
+    func addBlurEffect() {
+        let blurEffect = UIBlurEffect(style: UIBlurEffectStyle.Dark)
+        let blurEffectView = UIVisualEffectView(effect: blurEffect)
+        blurEffectView.frame = view.bounds
+        blurEffectView.autoresizingMask = [.FlexibleWidth, .FlexibleHeight]
+        view.addSubview(blurEffectView)
+    }
+    
+    func updateScrubber(time: CMTime) {
+        if player.currentItem != nil {
+            scrubber.setValue(Float(time.seconds / player.currentItem!.duration.seconds), animated: true)
+        }
     }
     
     func loadVisualElements() {
@@ -44,6 +61,10 @@ class PlayerViewController: UIViewController {
         let height = UIScreen.mainScreen().bounds.size.height
         let offset = height - width
         
+        backgroundImage = UIImageView(frame: CGRect(x: -height/4, y: 0, width: height, height: height))
+        backgroundImage.clipsToBounds = true
+        view.addSubview(backgroundImage)
+        addBlurEffect()
     
         trackImageView = UIImageView(frame: CGRect(x: 0.0, y: 0.0,
             width: width, height: width))
@@ -54,6 +75,7 @@ class PlayerViewController: UIViewController {
         titleLabel = UILabel(frame: CGRect(x: 0.0, y: width + offset * 0.15,
             width: width, height: 20.0))
         titleLabel.textAlignment = NSTextAlignment.Center
+        titleLabel.textColor = UIColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)
         view.addSubview(titleLabel)
 
         artistLabel = UILabel(frame: CGRect(x: 0.0, y: width + offset * 0.25,
@@ -74,6 +96,7 @@ class PlayerViewController: UIViewController {
         let nextImage = UIImage(named: "next")?.imageWithRenderingMode(.AlwaysTemplate)
         let previousImage = UIImage(named: "previous")?.imageWithRenderingMode(.AlwaysTemplate)
         
+        
         playPauseButton = UIButton(type: UIButtonType.Custom)
         playPauseButton.frame = CGRectMake(width / 2.0 - width / 30.0,
                                            width + offset * 0.5,
@@ -81,8 +104,9 @@ class PlayerViewController: UIViewController {
                                            width / 15.0)
         playPauseButton.setImage(playImage, forState: UIControlState.Normal)
         playPauseButton.setImage(pauseImage, forState: UIControlState.Selected)
-        playPauseButton.addTarget(self, action: "playOrPauseTrack:",
+        playPauseButton.addTarget(self, action: #selector(PlayerViewController.playOrPauseTrack(_:)),
             forControlEvents: UIControlEvents.TouchUpInside)
+        playPauseButton.tintColor = UIColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)
         view.addSubview(playPauseButton)
         
         previousButton = UIButton(type: UIButtonType.Custom)
@@ -91,8 +115,9 @@ class PlayerViewController: UIViewController {
                                           width / 15.0,
                                           width / 15.0)
         previousButton.setImage(previousImage, forState: UIControlState.Normal)
-        previousButton.addTarget(self, action: "previousTrackTapped:",
+        previousButton.addTarget(self, action: #selector(PlayerViewController.previousTrackTapped(_:)),
             forControlEvents: UIControlEvents.TouchUpInside)
+        previousButton.tintColor = UIColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)
         view.addSubview(previousButton)
 
         nextButton = UIButton(type: UIButtonType.Custom)
@@ -101,10 +126,19 @@ class PlayerViewController: UIViewController {
                                       width / 15.0,
                                       width / 15.0)
         nextButton.setImage(nextImage, forState: UIControlState.Normal)
-        nextButton.addTarget(self, action: "nextTrackTapped:",
+        nextButton.addTarget(self, action: #selector(PlayerViewController.nextTrackTapped(_:)),
             forControlEvents: UIControlEvents.TouchUpInside)
+        nextButton.tintColor = UIColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)
         view.addSubview(nextButton)
-
+        
+        scrubber = UISlider(frame: CGRect(x: width / 2.0 - (width / 1.25) / 2, y: width + offset * 0.5 - 40, width: width / 1.25, height: 25))
+        scrubber.addTarget(self, action: #selector(PlayerViewController.scrubberTapped(_:)), forControlEvents: .TouchUpInside)
+        scrubber.enabled = false
+        self.view.addSubview(scrubber)
+    }
+    
+    func scrubberTapped(sender: UISlider) {
+        player.seekToTime(CMTime(seconds: Double(scrubber.value) * player.currentItem!.duration.seconds, preferredTimescale: 44100))
     }
 
     
@@ -125,12 +159,37 @@ class PlayerViewController: UIViewController {
      *  property accordingly.
      */
     func playOrPauseTrack(sender: UIButton) {
+        if firstTime {
+            let url = getURL()
+            player = AVPlayer(URL: url)
+            firstTime = false
+            scrubber.enabled = true
+        }
+        if !playing {
+            doPlay()
+        } else {
+            doPause()
+        }
+    }
+    
+    func getURL() -> NSURL {
         let path = NSBundle.mainBundle().pathForResource("Info", ofType: "plist")
         let clientID = NSDictionary(contentsOfFile: path!)?.valueForKey("client_id") as! String
         let track = tracks[currentIndex]
-        let url = NSURL(string: "https://api.soundcloud.com/tracks/\(track.id)/stream?client_id=\(clientID)")!
-        // FILL ME IN
+        return NSURL(string: "https://api.soundcloud.com/tracks/\(track.id)/stream?client_id=\(clientID)")!
+    }
     
+    func doPlay() {
+        player.play()
+        playing = true
+        playPauseButton.setImage(UIImage(named: "pause")?.imageWithRenderingMode(.AlwaysTemplate), forState: .Normal)
+        player.addPeriodicTimeObserverForInterval(CMTime(value: 1, timescale: 1), queue: dispatch_get_main_queue(), usingBlock: updateScrubber)
+    }
+    
+    func doPause() {
+        player.pause()
+        playing = false
+        playPauseButton.setImage(UIImage(named: "play")?.imageWithRenderingMode(.AlwaysTemplate), forState: .Normal)
     }
     
     /* 
@@ -140,7 +199,21 @@ class PlayerViewController: UIViewController {
      * Remember to update the currentIndex
      */
     func nextTrackTapped(sender: UIButton) {
-    
+        if currentIndex + 1 < tracks.count {
+            currentIndex! += 1
+            if currentIndex == tracks.count - 1 {
+                nextButton.enabled = false
+            }
+            if previousButton.enabled == false {
+                previousButton.enabled = true
+            }
+        }
+        loadTrackElements()
+        let url = getURL()
+        player = AVPlayer(URL: url)
+        if playing {
+            doPlay()
+        }
     }
 
     /*
@@ -152,9 +225,33 @@ class PlayerViewController: UIViewController {
      *      a song is already playing
      *  Remember to update the currentIndex if necessary
      */
-
-    func previousTrackTapped(sender: UIButton) {
     
+    func previousTrackTapped(sender: UIButton) {
+        if player != nil {
+            if player.currentTime().seconds > 3 {
+                let url = getURL()
+                player = AVPlayer(URL: url)
+                doPlay()
+            } else {
+                if currentIndex == 0 {
+                    let url = getURL()
+                    player = AVPlayer(URL: url)
+                    doPlay()
+                }
+                if currentIndex - 1 >= 0 {
+                    currentIndex! -= 1
+                    if nextButton.enabled == false && tracks.count > 1 {
+                        nextButton.enabled = true
+                    }
+                    loadTrackElements()
+                    let url = getURL()
+                    player = AVPlayer(URL: url)
+                }
+                if playing {
+                    doPlay()
+                }
+            }
+        }
     }
     
     
@@ -169,6 +266,7 @@ class PlayerViewController: UIViewController {
                 dispatch_async(dispatch_get_global_queue(priority, 0)) {
                     dispatch_async(dispatch_get_main_queue()) {
                         self.trackImageView.image = image
+                        self.backgroundImage.image = image
                     }
                 }
             }
